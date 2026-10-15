@@ -1,0 +1,181 @@
+/* eslint-disable react/prop-types */
+/* eslint-disable no-unused-vars */
+import { React, useEffect, useState } from "react";
+import { runCompilerCode, runPracticeCode, getJobStatus } from "../../services/runCodeApi";
+import { isLoggedIn } from "../Login/isLoggedIn";
+import { useLocation, useParams } from "react-router-dom";
+import { toast } from "react-toastify";
+import { Button } from "../ui/button";
+import { Play } from "lucide-react";
+import { useDispatch, useSelector } from "react-redux";
+import { updateOutput } from "../../redux/slices/outputSlice";
+import { updateToggleOutput } from "../../redux/slices/toggleOutput";
+import { updatePracticeStatus } from "../../redux/slices/practiceStatusSlice";
+
+const RunButton = () => {
+        const [isLoading, setIsLoading] = useState(false);
+        const [userEmail, setUserEmail] = useState("");
+        const [userName, setUserName] = useState("");
+        const location = useLocation();
+        const { id } = useParams();
+        const output = useSelector((state) => state.output?.value);
+        const code = useSelector((state) => state.code?.value);
+        const userInput = useSelector((state) => state.userInput?.value);
+        const language = useSelector((state) => state.language?.value);
+        const dispatch = useDispatch();
+
+        useEffect(() => {
+                if (isLoggedIn()) {
+                        const email = localStorage.getItem("email");
+                        const username = localStorage.getItem("username");
+                        setUserEmail(email);
+                        setUserName(username);
+                }
+        }, []);
+
+        const handleClick = async () => {
+                if (!isLoggedIn()) {
+                        toast.warn("To save your submissions, please register", {
+                                position: "bottom-right",
+                        });
+                }
+                setIsLoading(true);
+                try {
+                        if (location.pathname.startsWith("/onlinecompiler") || location.pathname.startsWith("/room")) {
+                                const reqBody = {
+                                        code: code,
+                                        userInput: userInput,
+                                        language: language,
+                                        userEmail: userEmail,
+                                        userName: userName,
+                                };
+
+                                const result = await runCompilerCode(reqBody);
+
+                                if (result.jobId) {
+                                        let finalResult = null;
+
+                                        while (!finalResult) {
+                                                await new Promise(resolve => setTimeout(resolve, 1000));
+                                                const statusRes = await getJobStatus(result.jobId);
+                                                const currentStatus = statusRes.status;
+
+                                                if (currentStatus === "failed") {
+                                                        throw new Error(statusRes.error || "Job failed");
+                                                }
+                                                if (
+                                                        currentStatus === "queued" ||
+                                                        currentStatus === "active" ||
+                                                        currentStatus === "delayed"
+                                                ) {
+                                                        continue;
+                                                }
+                                                finalResult = statusRes;
+                                        }
+
+                                        if (finalResult && finalResult.stdout) {
+                                                dispatch(updateOutput(finalResult.stdout));
+                                                dispatch(updateToggleOutput(true));
+                                        } else {
+                                                dispatch(
+                                                        updateOutput(
+                                                                `Error During Execution : \n ${finalResult?.stderr || "Unknown error"}`
+                                                        )
+                                                );
+                                                dispatch(updateToggleOutput(true));
+                                        }
+                                } else if (result.stdout) {
+                                        dispatch(updateOutput(result.stdout));
+                                        dispatch(updateToggleOutput(true));
+                                } else {
+                                        dispatch(
+                                                updateOutput(
+                                                        `Error During Execution (Please check for semicolons and syntax errors) : \n ${result.stderr}`
+                                                )
+                                        );
+                                        dispatch(updateToggleOutput(true));
+                                }
+                        }
+                        if (location.pathname.startsWith("/practiceproblems")) {
+                                const reqBody = {
+                                        code: code,
+                                        language: language,
+                                        userEmail: userEmail,
+                                        questionID: id,
+                                        userName: userName,
+                                };
+
+                                const result = await runPracticeCode(reqBody);
+
+                                if (result.jobId) {
+                                        let finalResult = null;
+
+                                        while (!finalResult) {
+                                                await new Promise(resolve => setTimeout(resolve, 1000));
+                                                const statusRes = await getJobStatus(result.jobId);
+                                                const currentStatus = statusRes.status;
+
+                                                if (currentStatus === "failed") {
+                                                        throw new Error(statusRes.error || "Job failed");
+                                                }
+                                                if (
+                                                        currentStatus === "queued" ||
+                                                        currentStatus === "active" ||
+                                                        currentStatus === "delayed"
+                                                ) {
+                                                        continue;
+                                                }
+                                                finalResult = statusRes;
+                                        }
+
+                                        if (finalResult && finalResult.stdout) {
+                                                dispatch(updateOutput(finalResult.stdout));
+                                                dispatch(updateToggleOutput(true));
+                                                const passed = Boolean(finalResult.status);
+                                                dispatch(updatePracticeStatus(passed));
+                                                toast[passed ? "success" : "error"](
+                                                        passed ? "Accepted: all test cases passed." : "Wrong Answer: some test cases failed.",
+                                                        { position: "bottom-right" }
+                                                );
+                                        } else {
+                                                dispatch(
+                                                        updateOutput(
+                                                                `Error During Execution : \n ${finalResult?.stderr || "Unknown error"}`
+                                                        )
+                                                );
+                                                dispatch(updateToggleOutput(true));
+                                        }
+                                } else if (result?.resp?.stdout) {
+                                        dispatch(updateOutput(result.resp.stdout));
+                                        dispatch(updateToggleOutput(true));
+                                        dispatch(updatePracticeStatus(Boolean(result.status)));
+                                } else {
+                                        dispatch(
+                                                updateOutput(
+                                                        `Error During Execution (Please check for semicolons and syntax errors) : \n ${result.stderr}`
+                                                )
+                                        );
+                                        dispatch(updateToggleOutput(true));
+                                }
+                        }
+                } catch (err) {
+                        console.error("error : " + err);
+                } finally {
+                        setIsLoading(false);
+                }
+        };
+
+        return (
+                <Button
+                        onClick={handleClick}
+                        disabled={isLoading}
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700 text-white font-medium"
+                >
+                        <Play className="w-4 h-4 mr-2 fill-current" />
+                        {isLoading ? "Running..." : "Run Code"}
+                </Button>
+        );
+};
+
+export default RunButton;
